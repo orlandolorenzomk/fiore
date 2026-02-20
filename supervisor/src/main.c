@@ -2,9 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "process_table.h"
+#include "supervisor.h"
 
-static ProcessNode *make_node(const char *name, const char *path, pid_t pid, RestartPolicy policy) {
+static ProcessNode *make_node(const char *name, const char *path, RestartPolicy policy) {
     ProcessNode *node = calloc(1, sizeof(ProcessNode));
     if (node == NULL) {
         fprintf(stderr, "make_node: out of memory\n");
@@ -12,10 +14,9 @@ static ProcessNode *make_node(const char *name, const char *path, pid_t pid, Res
     }
     strncpy(node->name, name, sizeof(node->name) - 1);
     strncpy(node->path, path, sizeof(node->path) - 1);
-    node->pid            = pid;
     node->restart_policy = policy;
-    node->running        = true;
-    node->start_time     = time(NULL);
+    node->running        = false;
+    node->start_time     = 0;
     node->restart_count  = 0;
     return node;
 }
@@ -26,38 +27,67 @@ static void print_list(ProcessNode *head) {
         return;
     }
     for (ProcessNode *n = head; n != NULL; n = n->next) {
-        printf("  [%s] pid=%-6d policy=%d running=%d restarts=%u\n",
-               n->name, n->pid, n->restart_policy, n->running, n->restart_count);
+        printf("  [%-16s] pid=%-6d running=%d restarts=%u\n",
+               n->name, n->pid, n->running, n->restart_count);
     }
 }
 
 int main(void) {
-    process_table_logger_init("logs/process_table.log", true);
-
     ProcessNode *head = NULL;
 
-    /* --- append --- */
-    printf("=== append ===\n");
-    process_append(&head, make_node("api-service",   "/opt/api.jar",   1001, RESTART_ON_FAILURE), true);
-    process_append(&head, make_node("cache-service",  "/opt/cache.jar", 1002, RESTART_ALWAYS),     true);
-    process_append(&head, make_node("worker-service", "/opt/worker.jar",1003, RESTART_NEVER),      true);
+    /* Initialise both modules with a shared log destination. */
+    process_table_logger_init("logs/process_table.log", true);
+    supervisor_init(&head, "logs/supervisor.log", true);
+
+    /* --- build process table --- */
+    printf("\n=== loading table ===\n");
+    process_append(&head, make_node("spring-boot-test",
+        "/root/spring-boot-test-application/target/spring-boot-test-application-1.0-SNAPSHOT.jar",
+        RESTART_ON_FAILURE), true);
     print_list(head);
 
-    /* --- find --- */
-    printf("\n=== find ===\n");
-    printf("  find pid 1002: %s\n", process_find(&head, 1002) ? "found" : "not found");
-    printf("  find pid 9999: %s\n", process_find(&head, 9999) ? "found" : "not found");
-
-    /* --- remove --- */
-    printf("\n=== remove pid 1002 ===\n");
-    process_remove(&head, 1002);
+    /* --- start each service --- */
+    printf("\n=== start ===\n");
+    for (ProcessNode *n = head; n != NULL; n = n->next) {
+        int rc = supervisor_start(n);
+        printf("  start '%s': %s\n", n->name, rc == 0 ? "ok" : "failed");
+    }
     print_list(head);
 
-    /* --- persist and reload --- */
-    printf("\n=== reload from %s ===\n", PROCESS_PATH);
-    ProcessNode *loaded = NULL;
-    process_load(&loaded, PROCESS_PATH);
-    print_list(loaded);
+    /* Give processes a moment to settle. */
+    sleep(1);
+
+    /* --- status check --- */
+    printf("\n=== status ===\n");
+    for (ProcessNode *n = head; n != NULL; n = n->next) {
+        int rc = supervisor_status(n);
+        printf("  status '%s': %s\n", n->name,
+               rc == 0 ? "running" : rc == 1 ? "stopped" : "error");
+    }
+
+    /* --- monitor pass (applies restart policies to any dead processes) --- */
+    printf("\n=== monitor_all ===\n");
+    supervisor_monitor_all();
+
+    /* --- restart one service --- */
+    printf("\n=== restart spring-boot-test ===\n");
+    for (ProcessNode *n = head; n != NULL; n = n->next) {
+        if (strcmp(n->name, "spring-boot-test") == 0) {
+            int rc = supervisor_restart(n);
+            printf("  restart '%s': %s (restarts=%u)\n",
+                   n->name, rc == 0 ? "ok" : "failed", n->restart_count);
+            break;
+        }
+    }
+
+    /* --- stop all --- */
+    printf("\n=== stop all ===\n");
+    for (ProcessNode *n = head; n != NULL; n = n->next) {
+        int rc = supervisor_stop(n);
+        printf("  stop '%s': %s\n", n->name, rc == 0 ? "ok" : "failed/not running");
+    }
+    print_list(head);
 
     return EXIT_SUCCESS;
 }
+

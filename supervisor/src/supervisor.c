@@ -1,0 +1,196 @@
+#include "supervisor.h"
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+/* Seconds to wait for SIGTERM before escalating to SIGKILL. */
+#define STOP_GRACE_PERIOD 5
+
+/* Module state. */
+static Logger      sv_logger;
+static bool        sv_logger_ready = false;
+static ProcessNode **sv_head       = NULL;
+
+#define SV_LOG(fmt, ...) \
+    do { if (sv_logger_ready) logger_write(&sv_logger, fmt, ##__VA_ARGS__); } while (0)
+
+/* ------------------------------------------------------------------ */
+
+void supervisor_init(ProcessNode **head, const char *logfile_path, bool stdout_enabled) {
+    sv_head = head;
+    if (logger_init(&sv_logger, logfile_path, stdout_enabled) == 0) {
+        sv_logger_ready = true;
+    }
+    SV_LOG("supervisor_init: supervisor ready");
+}
+
+/* ------------------------------------------------------------------ */
+
+int supervisor_start(ProcessNode *node) {
+    if (node == NULL) {
+        SV_LOG("supervisor_start: node is NULL");
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        SV_LOG("supervisor_start: fork failed for '%s': %s", node->name, strerror(errno));
+        return -1;
+    }
+
+    if (pid == 0) {
+        /* Child — exec java -jar <path>. Never returns on success. */
+        execlp("java", "java", "-jar", node->path, (char *)NULL);
+        /* Only reached if exec fails. */
+        fprintf(stderr, "supervisor_start: execlp failed for '%s': %s\n",
+                node->path, strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+
+    /* Parent — record the new PID. */
+    node->pid        = pid;
+    node->running    = true;
+    node->start_time = time(NULL);
+
+    SV_LOG("supervisor_start: started '%s' (pid %d)", node->name, node->pid);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+
+int supervisor_stop(ProcessNode *node) {
+    if (node == NULL) {
+        SV_LOG("supervisor_stop: node is NULL");
+        return -1;
+    }
+
+    if (!node->running || node->pid <= 0) {
+        SV_LOG("supervisor_stop: '%s' is not running", node->name);
+        return -1;
+    }
+
+    SV_LOG("supervisor_stop: sending SIGTERM to '%s' (pid %d)", node->name, node->pid);
+
+    if (kill(node->pid, SIGTERM) != 0) {
+        SV_LOG("supervisor_stop: kill(SIGTERM) failed for '%s': %s",
+               node->name, strerror(errno));
+        return -1;
+    }
+
+    /* Wait up to STOP_GRACE_PERIOD seconds for clean exit. */
+    time_t deadline = time(NULL) + STOP_GRACE_PERIOD;
+    int    status;
+    while (time(NULL) < deadline) {
+        pid_t result = waitpid(node->pid, &status, WNOHANG);
+        if (result == node->pid) {
+            node->running = false;
+            SV_LOG("supervisor_stop: '%s' exited cleanly", node->name);
+            return 0;
+        }
+        sleep(1);
+    }
+
+    /* Grace period elapsed — escalate. */
+    SV_LOG("supervisor_stop: grace period elapsed, sending SIGKILL to '%s' (pid %d)",
+           node->name, node->pid);
+    kill(node->pid, SIGKILL);
+    waitpid(node->pid, &status, 0);
+    node->running = false;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+
+int supervisor_restart(ProcessNode *node) {
+    if (node == NULL) {
+        SV_LOG("supervisor_restart: node is NULL");
+        return -1;
+    }
+
+    SV_LOG("supervisor_restart: restarting '%s'", node->name);
+
+    if (node->running) {
+        if (supervisor_stop(node) != 0) {
+            SV_LOG("supervisor_restart: stop failed for '%s'", node->name);
+            return -1;
+        }
+    }
+
+    if (supervisor_start(node) != 0) {
+        SV_LOG("supervisor_restart: start failed for '%s'", node->name);
+        return -1;
+    }
+
+    node->restart_count++;
+    SV_LOG("supervisor_restart: '%s' restarted (restart #%u)",
+           node->name, node->restart_count);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+
+int supervisor_status(ProcessNode *node) {
+    if (node == NULL) {
+        SV_LOG("supervisor_status: node is NULL");
+        return -1;
+    }
+
+    /* kill(pid, 0) checks existence without sending a signal. */
+    if (kill(node->pid, 0) == 0) {
+        node->running = true;
+        SV_LOG("supervisor_status: '%s' (pid %d) is running — restarts: %u, uptime: %lds",
+               node->name, node->pid, node->restart_count,
+               (long)(time(NULL) - node->start_time));
+        return 0;
+    }
+
+    /* ESRCH means no such process. */
+    node->running = false;
+    SV_LOG("supervisor_status: '%s' (pid %d) is NOT running", node->name, node->pid);
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
+
+void supervisor_monitor_all(void) {
+    if (sv_head == NULL || *sv_head == NULL) {
+        SV_LOG("supervisor_monitor_all: process table is empty");
+        return;
+    }
+
+    SV_LOG("supervisor_monitor_all: checking all processes");
+
+    for (ProcessNode *node = *sv_head; node != NULL; node = node->next) {
+        int alive = supervisor_status(node);
+
+        if (alive == 0) {
+            /* Process is healthy — nothing to do. */
+            continue;
+        }
+
+        /* Process is dead — apply restart policy. */
+        switch (node->restart_policy) {
+            case RESTART_NEVER:
+                SV_LOG("supervisor_monitor_all: '%s' is down, policy=never, not restarting",
+                       node->name);
+                break;
+
+            case RESTART_ON_FAILURE:
+                SV_LOG("supervisor_monitor_all: '%s' is down, policy=on-failure, restarting",
+                       node->name);
+                supervisor_restart(node);
+                break;
+
+            case RESTART_ALWAYS:
+                SV_LOG("supervisor_monitor_all: '%s' is down, policy=always, restarting",
+                       node->name);
+                supervisor_restart(node);
+                break;
+        }
+    }
+}

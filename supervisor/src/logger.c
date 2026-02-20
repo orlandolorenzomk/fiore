@@ -15,6 +15,7 @@ static void timestamp(char *buf, size_t size) {
 
 int logger_init(Logger *logger, const char *logfile_path, bool stdout_enabled) {
     if (logger == NULL) {
+        fprintf(stderr, "logger_init: logger argument is NULL\n");
         return -1;
     }
 
@@ -37,6 +38,7 @@ int logger_init(Logger *logger, const char *logfile_path, bool stdout_enabled) {
 
 int logger_write(Logger *logger, const char *format, ...) {
     if (logger == NULL || format == NULL) {
+        fprintf(stderr, "logger_write: logger and format arguments must not be NULL\n");
         return -1;
     }
 
@@ -51,6 +53,7 @@ int logger_write(Logger *logger, const char *format, ...) {
 
     if (logger->logfile != NULL) {
         if (fprintf(logger->logfile, "[%s] %s\n", ts, message) < 0) {
+            fprintf(stderr, "logger_write: failed to write to log file '%s'\n", logger->logfile_path);
             return -1;
         }
     }
@@ -64,11 +67,13 @@ int logger_write(Logger *logger, const char *format, ...) {
 
 int logger_flush(Logger *logger) {
     if (logger == NULL) {
+        fprintf(stderr, "logger_flush: logger argument is NULL\n");
         return -1;
     }
 
     if (logger->logfile != NULL) {
         if (fflush(logger->logfile) != 0) {
+            fprintf(stderr, "logger_flush: failed to flush log file '%s'\n", logger->logfile_path);
             return -1;
         }
     }
@@ -78,12 +83,14 @@ int logger_flush(Logger *logger) {
 
 int logger_close(Logger *logger) {
     if (logger == NULL) {
+        fprintf(stderr, "logger_close: logger argument is NULL\n");
         return -1;
     }
 
     if (logger->logfile != NULL) {
         logger_flush(logger);
         if (fclose(logger->logfile) != 0) {
+            fprintf(stderr, "logger_close: failed to close log file '%s'\n", logger->logfile_path);
             return -1;
         }
         logger->logfile = NULL;

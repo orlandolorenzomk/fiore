@@ -60,6 +60,15 @@ static void file_update_content(ProcessNode **head) {
     fclose(fptr);
 }
 
+void process_table_save(ProcessNode **head) {
+    if (head == NULL) {
+        PT_LOG("process_table_save: head is NULL");
+        return;
+    }
+    file_update_content(head);
+    PT_LOG("process_table_save: table persisted to %s", PROCESS_PATH);
+}
+
 bool process_load(ProcessNode **head, const char *path) {
     if (head == NULL) {
         PT_LOG("process_load: head argument is NULL");

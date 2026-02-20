@@ -87,6 +87,16 @@ bool process_remove(ProcessNode **head, pid_t pid);
 bool process_find(ProcessNode **head, pid_t pid);
 
 /**
+ * @brief Persists the current in-memory process table to @ref PROCESS_PATH.
+ *
+ * Useful after in-place mutation of node fields (e.g. marking a process
+ * as stopped) without needing to remove and re-insert the node.
+ *
+ * @param head  Address of the list head pointer. Must not be NULL.
+ */
+void process_table_save(ProcessNode **head);
+
+/**
  * @brief Initialises the module-level logger used by all process table functions.
  *
  * Must be called before any other process table function if logging to a file

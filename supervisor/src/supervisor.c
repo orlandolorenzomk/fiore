@@ -1,5 +1,7 @@
 #include "supervisor.h"
 #include <errno.h>
+#include <fcntl.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,11 +46,23 @@ int supervisor_start(ProcessNode *node) {
     }
 
     if (pid == 0) {
-        /* Child — exec java -jar <path>. Never returns on success. */
+        /* Child — detach from the parent's session so it survives the CLI exiting. */
+        if (setsid() < 0) {
+            fprintf(stderr, "supervisor_start: setsid failed: %s\n", strerror(errno));
+            _exit(EXIT_FAILURE);
+        }
+
+        /* Redirect stdin/stdout/stderr to /dev/null so the child holds no terminal. */
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+
+        /* exec java -jar <path>. Never returns on success. */
         execlp("java", "java", "-jar", node->path, (char *)NULL);
-        /* Only reached if exec fails. */
-        fprintf(stderr, "supervisor_start: execlp failed for '%s': %s\n",
-                node->path, strerror(errno));
         _exit(EXIT_FAILURE);
     }
 

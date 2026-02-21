@@ -88,14 +88,34 @@ int supervisor_start(ProcessNode *node) {
             _exit(EXIT_FAILURE);
         }
 
-        /* Redirect stdin/stdout/stderr to /dev/null so the child holds no terminal. */
+        /* Redirect stdin to /dev/null. Redirect stdout/stderr to the service log
+         * file if one is configured, otherwise also send them to /dev/null. */
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
             dup2(devnull, STDIN_FILENO);
-            dup2(devnull, STDOUT_FILENO);
-            dup2(devnull, STDERR_FILENO);
-            if (devnull > STDERR_FILENO) close(devnull);
         }
+        if (node->log_path[0] != '\0') {
+            int logfd = open(node->log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (logfd >= 0) {
+                dup2(logfd, STDOUT_FILENO);
+                dup2(logfd, STDERR_FILENO);
+                if (logfd > STDERR_FILENO) close(logfd);
+            } else {
+                /* stderr still points to terminal here — log the error then silence it. */
+                fprintf(stderr, "supervisor_start: could not open log file '%s': %s\n",
+                        node->log_path, strerror(errno));
+                if (devnull >= 0) {
+                    dup2(devnull, STDOUT_FILENO);
+                    dup2(devnull, STDERR_FILENO);
+                }
+            }
+        } else {
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+            }
+        }
+        if (devnull > STDERR_FILENO) close(devnull);
 
         /* Load environment variables from the .env file if one is configured. */
         if (node->env_path[0] != '\0') {
@@ -103,7 +123,9 @@ int supervisor_start(ProcessNode *node) {
         }
 
         /* exec java -jar <path>. Never returns on success. */
-        execlp("java", "java", "-jar", node->path, (char *)NULL);
+        char port_arg[32];
+        snprintf(port_arg, sizeof(port_arg), "--server.port=%hu", node->port);
+        execlp("java", "java", "-jar", node->path, port_arg, (char *)NULL);
         _exit(EXIT_FAILURE);
     }
 

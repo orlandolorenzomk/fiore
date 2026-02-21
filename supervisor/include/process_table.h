@@ -28,7 +28,9 @@ typedef enum {
 typedef struct ProcessNode {
     char          name[64];       /* Human-readable service name. */
     char          path[256];      /* Absolute path to the application JAR. */
-    char          env_path[256];  /* Absolute path of the .env associated to the JAR */        
+    char          env_path[256];  /* Absolute path of the .env associated to the JAR */
+    char          log_path[256];  /* Absolute path of the log file for the process stdout/stderr. */
+    uint16_t      port;           /* Port associated to the JAR */  
     pid_t         pid;            /* OS process ID assigned at launch. */
     RestartPolicy restart_policy; /* Restart behaviour applied when the process exits. */
     uint32_t      restart_count;  /* Number of times the process has been restarted. */

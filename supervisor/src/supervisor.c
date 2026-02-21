@@ -1,7 +1,6 @@
 #include "supervisor.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +32,47 @@ void supervisor_init(ProcessNode **head, const char *logfile_path, bool stdout_e
 
 /* ------------------------------------------------------------------ */
 
+/*
+ * Reads a .env file and calls setenv() for each non-empty, non-comment line.
+ * Expected format: KEY=VALUE  (no quoting, no export prefix)
+ * Lines starting with '#' and blank lines are silently skipped.
+ * Called in the child process only.
+ */
+static void load_env_file(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        fprintf(stderr, "supervisor_start: could not open env file '%s': %s\n",
+                path, strerror(errno));
+        return;
+    }
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Strip trailing newline / carriage return. */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+
+        /* Skip blank lines and comments. */
+        if (len == 0 || line[0] == '#') continue;
+
+        /* Must contain '=' to be a valid KEY=VALUE pair. */
+        char *eq = strchr(line, '=');
+        if (eq == NULL) continue;
+
+        *eq = '\0';
+        const char *key   = line;
+        const char *value = eq + 1;
+
+        if (setenv(key, value, 1) != 0) {
+            fprintf(stderr, "supervisor_start: setenv(%s) failed: %s\n",
+                    key, strerror(errno));
+        }
+    }
+
+    fclose(f);
+}
+
 int supervisor_start(ProcessNode *node) {
     if (node == NULL) {
         SV_LOG("supervisor_start: node is NULL");
@@ -59,6 +99,11 @@ int supervisor_start(ProcessNode *node) {
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
             if (devnull > STDERR_FILENO) close(devnull);
+        }
+
+        /* Load environment variables from the .env file if one is configured. */
+        if (node->env_path[0] != '\0') {
+            load_env_file(node->env_path);
         }
 
         /* exec java -jar <path>. Never returns on success. */

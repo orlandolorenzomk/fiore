@@ -12,7 +12,7 @@
 static void usage(const char *argv0) {
     fprintf(stderr,
         "Usage:\n"
-        "  %s start   <name> <jar> [--restart never|on-failure|always]\n"
+        "  %s start   <name> <jar> [--restart never|on-failure|always] [--env <file>]\n"
         "  %s stop    <name>\n"
         "  %s restart <name>\n"
         "  %s status  [<name>]\n"
@@ -65,29 +65,57 @@ static ProcessNode *make_node(const char *name, const char *path, RestartPolicy 
 /* ------------------------------------------------------------------ */
 
 static int cmd_start(ProcessNode **head, int argc, char **argv) {
-    /* start <name> <jar> [--restart <policy>] */
+    /* start <name> <jar> [--restart <policy>] [--env <file>] */
     if (argc < 4) {
         fprintf(stderr, "start: expected <name> <jar>\n");
         return 1;
     }
 
-    const char *name = argv[2];
-    const char *jar  = argv[3];
+    const char   *name     = argv[2];
+    const char   *jar      = argv[3];
+    RestartPolicy policy   = RESTART_ON_FAILURE;
+    const char   *env_path = NULL;
 
-    RestartPolicy policy = RESTART_ON_FAILURE;
     for (int i = 4; i < argc - 1; i++) {
         if (strcmp(argv[i], "--restart") == 0) {
             policy = parse_policy(argv[i + 1]);
-            break;
+        } else if (strcmp(argv[i], "--env") == 0) {
+            env_path = argv[i + 1];
         }
     }
 
-    if (find_by_name(*head, name) != NULL) {
-        fprintf(stderr, "start: service '%s' already exists — use restart to relaunch it\n", name);
-        return 1;
+    ProcessNode *existing = find_by_name(*head, name);
+    if (existing != NULL) {
+        if (existing->running) {
+            fprintf(stderr, "start: service '%s' is already running (pid %d)\n",
+                    name, existing->pid);
+            return 1;
+        }
+
+        /* Service exists but is stopped — update fields and re-launch. */
+        strncpy(existing->path, jar, sizeof(existing->path) - 1);
+        existing->restart_policy = policy;
+        memset(existing->env_path, 0, sizeof(existing->env_path));
+        if (env_path != NULL) {
+            strncpy(existing->env_path, env_path, sizeof(existing->env_path) - 1);
+        }
+
+        if (supervisor_start(existing) != 0) {
+            fprintf(stderr, "start: failed to re-launch '%s'\n", name);
+            return 1;
+        }
+        process_table_save(head);
+        printf("Started '%s' (pid %d, restart=%s%s%s)\n",
+               name, existing->pid, policy_str(policy),
+               env_path ? ", env=" : "",
+               env_path ? env_path : "");
+        return 0;
     }
 
     ProcessNode *node = make_node(name, jar, policy);
+    if (env_path != NULL) {
+        strncpy(node->env_path, env_path, sizeof(node->env_path) - 1);
+    }
 
     /* Start first so that fork() fills in pid, running, and start_time. */
     if (supervisor_start(node) != 0) {
@@ -99,7 +127,10 @@ static int cmd_start(ProcessNode **head, int argc, char **argv) {
     /* Append and persist now that all fields are populated. */
     process_append(head, node, true);
 
-    printf("Started '%s' (pid %d, restart=%s)\n", name, node->pid, policy_str(policy));
+    printf("Started '%s' (pid %d, restart=%s%s%s)\n",
+           name, node->pid, policy_str(policy),
+           env_path ? ", env=" : "",
+           env_path ? env_path : "");
     return 0;
 }
 
@@ -212,10 +243,11 @@ static int cmd_remove(ProcessNode **head, int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry point                                                         */
+/* Entry point                                                        */
 /* ------------------------------------------------------------------ */
 
 int main(int argc, char **argv) {
+    puts("\n=============================== FIORE SUPERVISOR ===============================\n");
     if (argc < 2) { usage(argv[0]); return 1; }
 
     ProcessNode *head = NULL;
@@ -223,7 +255,6 @@ int main(int argc, char **argv) {
     process_table_logger_init("logs/process_table.log", false);
     supervisor_init(&head, "logs/supervisor.log", false);
 
-    /* Always load persisted state first. */
     process_load(&head, PROCESS_PATH);
 
     const char *cmd = argv[1];

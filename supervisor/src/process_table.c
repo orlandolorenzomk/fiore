@@ -15,6 +15,7 @@ static bool   pt_logger_ready = false;
 typedef struct {
     char          name[64];
     char          path[256];
+    char          env_path[256];
     pid_t         pid;
     RestartPolicy restart_policy;
     bool          running;
@@ -44,6 +45,7 @@ static void file_update_content(ProcessNode **head) {
 
         strncpy(record.name, current->name, sizeof(record.name) - 1);
         strncpy(record.path, current->path, sizeof(record.path) - 1);
+        strncpy(record.env_path, current->env_path, sizeof(record.env_path) - 1);
         record.pid            = current->pid;
         record.restart_policy = current->restart_policy;
         record.running        = current->running;
@@ -97,6 +99,7 @@ bool process_load(ProcessNode **head, const char *path) {
 
         strncpy(node->name, record.name, sizeof(node->name) - 1);
         strncpy(node->path, record.path, sizeof(node->path) - 1);
+        strncpy(node->env_path, record.env_path, sizeof(node->env_path) - 1);
         node->pid            = record.pid;
         node->restart_policy = record.restart_policy;
         node->running        = record.running;

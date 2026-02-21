@@ -8,7 +8,6 @@ BUILD   = build
 SRC     = src
 
 SRCS    = $(SRC)/main.c \
-          $(SRC)/config.c \
           $(SRC)/logger.c \
           $(SRC)/process_table.c \
           $(SRC)/supervisor.c

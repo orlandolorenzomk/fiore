@@ -1,4 +1,4 @@
 supervisor/build/*.*
 supervisor/bin/supervisor
-supervisor/logs/process_table.log
-supervisor/logs/supervisor.log
+supervisor/logs/*.*
+supervisor/bin/supervisor

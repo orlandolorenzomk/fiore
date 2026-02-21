@@ -20,8 +20,6 @@ static ProcessNode **sv_head       = NULL;
 #define SV_LOG(fmt, ...) \
     do { if (sv_logger_ready) logger_write(&sv_logger, fmt, ##__VA_ARGS__); } while (0)
 
-/* ------------------------------------------------------------------ */
-
 void supervisor_init(ProcessNode **head, const char *logfile_path, bool stdout_enabled) {
     sv_head = head;
     if (logger_init(&sv_logger, logfile_path, stdout_enabled) == 0) {
@@ -29,8 +27,6 @@ void supervisor_init(ProcessNode **head, const char *logfile_path, bool stdout_e
     }
     SV_LOG("supervisor_init: supervisor ready");
 }
-
-/* ------------------------------------------------------------------ */
 
 /*
  * Reads a .env file and calls setenv() for each non-empty, non-comment line.
@@ -120,8 +116,6 @@ int supervisor_start(ProcessNode *node) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-
 int supervisor_stop(ProcessNode *node) {
     if (node == NULL) {
         SV_LOG("supervisor_stop: node is NULL");
@@ -163,8 +157,6 @@ int supervisor_stop(ProcessNode *node) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-
 int supervisor_restart(ProcessNode *node) {
     if (node == NULL) {
         SV_LOG("supervisor_restart: node is NULL");
@@ -191,8 +183,6 @@ int supervisor_restart(ProcessNode *node) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-
 int supervisor_status(ProcessNode *node) {
     if (node == NULL) {
         SV_LOG("supervisor_status: node is NULL");
@@ -213,8 +203,6 @@ int supervisor_status(ProcessNode *node) {
     SV_LOG("supervisor_status: '%s' (pid %d) is NOT running", node->name, node->pid);
     return 1;
 }
-
-/* ------------------------------------------------------------------ */
 
 void supervisor_monitor_all(ProcessNode **head) {
     if (head == NULL || *head == NULL) {

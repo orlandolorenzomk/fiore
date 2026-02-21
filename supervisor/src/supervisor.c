@@ -171,15 +171,15 @@ int supervisor_status(ProcessNode *node) {
 
 /* ------------------------------------------------------------------ */
 
-void supervisor_monitor_all(void) {
-    if (sv_head == NULL || *sv_head == NULL) {
+void supervisor_monitor_all(ProcessNode **head) {
+    if (head == NULL || *head == NULL) {
         SV_LOG("supervisor_monitor_all: process table is empty");
         return;
     }
 
     SV_LOG("supervisor_monitor_all: checking all processes");
 
-    for (ProcessNode *node = *sv_head; node != NULL; node = node->next) {
+    for (ProcessNode *node = *head; node != NULL; node = node->next) {
         int alive = supervisor_status(node);
 
         if (alive == 0) {

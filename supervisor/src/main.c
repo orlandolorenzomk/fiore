@@ -190,7 +190,7 @@ static int cmd_list(ProcessNode **head) {
 }
 
 static int cmd_monitor(ProcessNode **head) {
-    supervisor_monitor_all();
+    supervisor_monitor_all(head);
     process_table_save(head);
     return 0;
 }

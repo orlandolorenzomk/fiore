@@ -67,6 +67,6 @@ int supervisor_status(ProcessNode *node);
  * its @c restart_policy: restarts on failure or always as configured.
  * Intended to be called periodically from a monitoring loop.
  */
-void supervisor_monitor_all(void);
+void supervisor_monitor_all(ProcessNode **head);
 
 #endif // SUPERVISOR_H

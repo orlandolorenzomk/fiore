@@ -1,3 +1,53 @@
+/*
+ * main.c — Fiore Supervisor CLI
+ * ============================================================
+ * Entry point for the Fiore process supervisor. Parses command-line
+ * arguments and dispatches to the appropriate lifecycle command.
+ *
+ * The supervisor manages Spring Boot JAR processes on a Fiore host.
+ * Each managed service is represented as a node in a persistent
+ * linked-list process table, serialized to disk so that state survives
+ * across invocations.
+ *
+ * Commands
+ * --------
+ *   start   <name> <jar> [--port <p>] [--restart <policy>]
+ *                        [--env <file>] [--log <file>]
+ *             Fork and exec a JAR as a detached background process.
+ *
+ *   stop    <name>
+ *             Send SIGTERM, escalating to SIGKILL after a grace period.
+ *
+ *   restart <name>
+ *             Stop then re-launch the service, incrementing its restart counter.
+ *
+ *   status  [<name>]
+ *             Live status for one service, or a formatted table for all.
+ *
+ *   list
+ *             List all registered services with their current running state.
+ *
+ *   monitor
+ *             Check every process once and restart any that are down,
+ *             according to their configured restart policy. Intended to
+ *             be called periodically (e.g. from cron).
+ *
+ *   remove  <name>
+ *             Stop the service (if running) and remove it from the table.
+ *
+ * Persistence
+ * -----------
+ *   The process table is stored as a binary file at state/processes.dat.
+ *   It is loaded at startup and written back after every mutating command.
+ *
+ * Logging
+ * -------
+ *   Internal supervisor events  →  logs/supervisor.log
+ *   Process table operations    →  logs/process_table.log
+ *   Managed process output      →  path supplied via --log (per service)
+ * ============================================================
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
